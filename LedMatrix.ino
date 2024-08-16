@@ -30,11 +30,9 @@ PubSubClient mqttClient(espClient);
 #define DATA_PIN 4
 
 uint8_t og_matrix[NUM_ROW][NUM_COL];
-uint8_t led_matrix[NUM_ROW][NUM_COL];
-
 int textPosition; // Position for text animation
 int maxTextColumns; // Maximum columns for the text
-int animationSpeed;
+int animationSpeed = 5; // Default speed
 
 unsigned short Alphabets[][5]={ 
 0x7e, 0x09, 0x09, 0x09, 0x7e, // A
@@ -117,7 +115,6 @@ unsigned short Alphabets[][5]={
 0x20, 0x10, 0x08, 0x04, 0x02,   // /
 };
 
-
 // Forward declarations
 void connectToWifi();
 void connectToMQTT();
@@ -125,37 +122,28 @@ void mqttCallback(char* topic, byte* payload, unsigned int length);
 void animateText();
 void clearLEDMatrix();
 int calculateRowPin(uint8_t row);
+void disableRow(int row);
 
 void setup() {
   Serial.begin(115200);
 
-  pinMode(R1_PIN, OUTPUT); // R61
-  pinMode(R2_PIN, OUTPUT); // R62
-  pinMode(R3_PIN, OUTPUT); // R63
-  pinMode(R4_PIN, OUTPUT); // R64
-  pinMode(R5_PIN, OUTPUT); // R65
-  pinMode(R6_PIN, OUTPUT); // R66
-  pinMode(R7_PIN, OUTPUT); // R67
+  // Set up LED matrix pins
+  pinMode(R1_PIN, OUTPUT);
+  pinMode(R2_PIN, OUTPUT);
+  pinMode(R3_PIN, OUTPUT);
+  pinMode(R4_PIN, OUTPUT);
+  pinMode(R5_PIN, OUTPUT);
+  pinMode(R6_PIN, OUTPUT);
+  pinMode(R7_PIN, OUTPUT);
 
-  pinMode(CLOCK_PIN, OUTPUT); // CLK 10
-  pinMode(DATA, OUTPUT); // U2B 11
+  pinMode(CLOCK_PIN, OUTPUT);
+  pinMode(DATA_PIN, OUTPUT);
 
-  digitalWrite(CLOCK_PIN, LOW);
-  digitalWrite(R1_PIN, HIGH);
-  digitalWrite(R2_PIN, HIGH);
-  digitalWrite(R3_PIN, HIGH);
-  digitalWrite(R4_PIN, HIGH);
-  digitalWrite(R5_PIN, HIGH);
-  digitalWrite(R6_PIN, HIGH);
-  digitalWrite(R7_PIN, HIGH);
-
-  clean_matrix();
+  clearLEDMatrix(); // Clears the matrix before starting
   
   connectToWifi();
   mqttClient.setServer(MQTT_BROKER, 1883);
   mqttClient.setCallback(mqttCallback);
-
-  // LED matrix pin setup code
 }
 
 void loop() {
@@ -163,6 +151,7 @@ void loop() {
     connectToMQTT();
   }
   mqttClient.loop();
+  animateText();  // Continuously animate text if a message is present
 }
 
 void connectToWifi() {
@@ -210,8 +199,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   // Prepare the message for display
   createText(message);
-  animationSpeed = 5; // Adjust speed as needed
-  animateText(); // This may need adjustment to fit within your application's structure
+  textPosition = 0; // Reset text position for new message
 }
 
 void createText(const char* text) {
@@ -237,43 +225,46 @@ void createText(const char* text) {
 }
 
 void animateText() {
-  for (textPosition = 0; textPosition < maxTextColumns + NUM_COL; textPosition++) {
-    // Shift text left by one column
-    for (int row = 0; row < NUM_ROW; row++) {
-      for (int col = 0; col < NUM_COL; col++) {
-        int sourceCol = textPosition + col - NUM_COL;
-        led_matrix[row][col] = (sourceCol >= 0 && sourceCol < maxTextColumns) ? og_matrix[row][sourceCol] : 0;
+  if (maxTextColumns == 0) return;  // No text to animate
+
+  // Shift text left by one column
+  for (int row = 0; row < NUM_ROW; row++) {
+    digitalWrite(calculateRowPin(row), LOW);  // Enable the current row
+
+    for (int col = 0; col < NUM_COL; col++) {
+      int sourceCol = textPosition + col - NUM_COL;
+      if (sourceCol >= 0 && sourceCol < maxTextColumns) {
+        writePixel(og_matrix[row][sourceCol]);
+      } else {
+        writePixel(0); // Fill empty space with zeros
       }
     }
-    
-    // Draw the current frame of the text animation
-    drawMatrix();
-    delay(animationSpeed * 10); // Adjust delay to control the speed of the animation
+
+    disableRow(row);  // Disable the current row after processing it
+  }
+
+  delay(animationSpeed * 10); // Adjust delay to control the speed of the animation
+
+  textPosition++;
+  if (textPosition > maxTextColumns + NUM_COL) {
+    textPosition = 0;  // Restart animation if text has scrolled off
   }
 }
 
-void drawMatrix() {
+void clearLEDMatrix() {
   for (uint8_t row = 0; row < NUM_ROW; row++) {
-    enableRow(row);
-    for (uint8_t col = 0; col < NUM_COL; col++) {
-      writePixel(led_matrix[row][col]);
-    }
-    disableRow(row);
+    disableRow(row);  // Disable all rows
   }
-}
-
-void enableRow(uint8_t row) {
-  digitalWrite(calculateRowPin(row), LOW); // Assuming LOW enables the row
-}
-
-void disableRow(uint8_t row) {
-  digitalWrite(calculateRowPin(row), HIGH); // Assuming HIGH disables the row
 }
 
 void writePixel(uint8_t value) {
   digitalWrite(DATA_PIN, value);
   digitalWrite(CLOCK_PIN, HIGH);
   digitalWrite(CLOCK_PIN, LOW); // Clock the data in
+}
+
+void disableRow(int row) {
+  digitalWrite(calculateRowPin(row), HIGH); // Assuming HIGH disables the row
 }
 
 int calculateRowPin(uint8_t row) {
